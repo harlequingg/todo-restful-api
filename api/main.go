@@ -1,7 +1,6 @@
 package main
 
 import (
-	"context"
 	"database/sql"
 	"flag"
 	"fmt"
@@ -9,8 +8,6 @@ import (
 	"net/http"
 	"os"
 	"time"
-
-	_ "github.com/lib/pq"
 )
 
 const version = "1.0.0"
@@ -28,6 +25,7 @@ type config struct {
 
 type application struct {
 	config config
+	db     *sql.DB
 }
 
 func main() {
@@ -52,28 +50,15 @@ func main() {
 		cfg.db.maxIdelTime = d
 	}
 
-	db, err := sql.Open("postgres", cfg.db.dsn)
+	db, err := openDB(cfg)
 	if err != nil {
 		log.Fatal(err)
 	}
-	defer db.Close()
-
-	db.SetMaxOpenConns(cfg.db.maxOpenConnections)
-	db.SetMaxIdleConns(cfg.db.maxIdelConnections)
-	db.SetConnMaxIdleTime(cfg.db.maxIdelTime)
-
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-
-	err = db.PingContext(ctx)
-	if err != nil {
-		log.Fatal(err)
-	}
-
 	log.Println("established a connection with database")
 
 	app := &application{
 		config: cfg,
+		db:     db,
 	}
 
 	srv := &http.Server{
