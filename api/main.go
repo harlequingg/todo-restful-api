@@ -1,7 +1,6 @@
 package main
 
 import (
-	"database/sql"
 	"flag"
 	"fmt"
 	"log"
@@ -24,8 +23,8 @@ type config struct {
 }
 
 type application struct {
-	config config
-	db     *sql.DB
+	config  config
+	storage *storage
 }
 
 func main() {
@@ -57,8 +56,8 @@ func main() {
 	log.Println("established a connection with database")
 
 	app := &application{
-		config: cfg,
-		db:     db,
+		config:  cfg,
+		storage: newStorage(db),
 	}
 
 	srv := &http.Server{
