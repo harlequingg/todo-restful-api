@@ -7,6 +7,7 @@ import (
 	"log"
 	"net/http"
 	"strconv"
+	"time"
 
 	"golang.org/x/crypto/bcrypt"
 )
@@ -77,7 +78,7 @@ func (app *application) createUserHandler(w http.ResponseWriter, r *http.Request
 		writeError(w, err, http.StatusInternalServerError)
 		return
 	}
-
+	app.storage.useractivationCache.Set(u, time.Minute)
 	writeJSON(w, u, http.StatusCreated)
 }
 
@@ -189,10 +190,12 @@ func (app *application) deleteUserHandler(w http.ResponseWriter, r *http.Request
 		writeError(w, errors.New("internal server error"), http.StatusInternalServerError)
 		return
 	}
+
 	if u == nil {
 		writeError(w, errors.New("user doesn't exist"), http.StatusNotFound)
 		return
 	}
+
 	err = app.storage.deleteUser(u)
 	if err != nil {
 		log.Println(err)
@@ -200,6 +203,75 @@ func (app *application) deleteUserHandler(w http.ResponseWriter, r *http.Request
 		return
 	}
 	writeJSON(w, map[string]any{"message": "user successfully deleted"}, http.StatusOK)
+}
+
+func (app *application) sendActivationCodeHandler(w http.ResponseWriter, r *http.Request) {
+	id, err := strconv.Atoi(r.PathValue("id"))
+	if err != nil || id < -1 {
+		writeError(w, errors.New("route paramter {id}: must to be a positive integer"), http.StatusBadRequest)
+		return
+	}
+
+	u, err := app.storage.getUserByID(id)
+	if err != nil {
+		writeError(w, errors.New("internal server error"), http.StatusInternalServerError)
+		return
+	}
+	if u.IsActivated {
+		writeJSON(w, map[string]any{"message": "user already activated"}, http.StatusConflict)
+		return
+	}
+	// TODO: send mail to user with the code
+	app.storage.useractivationCache.SetIfExpired(u, time.Minute)
+
+	// TODO: temprary until we send emails
+	code, _ := app.storage.useractivationCache.Get(u)
+	writeJSON(w, map[string]any{"code": code}, http.StatusOK)
+}
+
+func (app *application) activateUserHandler(w http.ResponseWriter, r *http.Request) {
+	id, err := strconv.Atoi(r.PathValue("id"))
+	if err != nil || id < -1 {
+		writeError(w, errors.New("route paramter {id}: must to be a positive integer"), http.StatusBadRequest)
+		return
+	}
+
+	if !r.URL.Query().Has("code") {
+		writeError(w, errors.New("route query paramter {code}: must to be provided"), http.StatusBadRequest)
+		return
+	}
+
+	code, err := strconv.Atoi(r.URL.Query().Get("code"))
+	if err != nil {
+		writeError(w, errors.New("route query paramter {code}: must to be a positive integer"), http.StatusBadRequest)
+		return
+	}
+	u, err := app.storage.getUserByID(id)
+	if err != nil {
+		writeError(w, errors.New("internal server error"), http.StatusInternalServerError)
+		return
+	}
+	if u.IsActivated {
+		writeJSON(w, map[string]any{"message": "user already activated"}, http.StatusConflict)
+		return
+	}
+	activationCode, expired := app.storage.useractivationCache.Get(u)
+	if expired {
+		writeJSON(w, map[string]any{"message": "code has expired"}, http.StatusConflict)
+		return
+	}
+	if activationCode != code {
+		writeJSON(w, map[string]any{"message": "invalid activation code"}, http.StatusConflict)
+		return
+	}
+	u.IsActivated = true
+	err = app.storage.updateUser(u)
+	if err != nil {
+		log.Println(err)
+		writeError(w, errors.New("internal server error"), http.StatusInternalServerError)
+		return
+	}
+	writeJSON(w, map[string]any{"user": u}, http.StatusOK)
 }
 
 func composeJSONError(err error) string {

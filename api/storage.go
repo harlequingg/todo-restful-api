@@ -4,6 +4,8 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"math/rand"
+	"sync"
 	"time"
 
 	_ "github.com/lib/pq"
@@ -30,13 +32,91 @@ func openDB(cfg config) (*sql.DB, error) {
 	return db, nil
 }
 
+type userActivationCacheEntry struct {
+	code      uint16
+	expiresAt time.Time
+}
+
+type userActivationCache struct {
+	mu      sync.RWMutex
+	entries map[int]userActivationCacheEntry
+}
+
+func newUserActivationCache() *userActivationCache {
+	c := &userActivationCache{
+		entries: make(map[int]userActivationCacheEntry),
+	}
+	go func(c *userActivationCache) {
+		ticker := time.NewTicker(time.Minute)
+		for {
+			<-ticker.C
+			func() {
+				c.mu.Lock()
+				defer c.mu.Unlock()
+				for k, v := range c.entries {
+					if time.Now().After(v.expiresAt) {
+						delete(c.entries, k)
+					}
+				}
+			}()
+		}
+	}(c)
+	return c
+}
+
+func (c *userActivationCache) Set(u *user, d time.Duration) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.entries[u.ID] = userActivationCacheEntry{
+		code:      uint16(rand.Uint32()),
+		expiresAt: time.Now().Add(d),
+	}
+}
+
+func (c *userActivationCache) Get(u *user) (int, bool) {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	e, ok := c.entries[u.ID]
+	if !ok {
+		return 0, true
+	}
+	return int(e.code), time.Now().After(e.expiresAt)
+}
+
+func (c *userActivationCache) SetIfExpired(u *user, d time.Duration) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	e, ok := c.entries[u.ID]
+	if !ok || time.Now().After(e.expiresAt) {
+		c.entries[u.ID] = userActivationCacheEntry{
+			code:      uint16(rand.Uint32()),
+			expiresAt: time.Now().Add(d),
+		}
+	}
+}
+
+func (c *userActivationCache) Clear(u *user) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	delete(c.entries, u.ID)
+}
+
+func (c *userActivationCache) Expired(u *user) bool {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	e := c.entries[u.ID]
+	return time.Now().After(e.expiresAt)
+}
+
 type storage struct {
-	db *sql.DB
+	db                  *sql.DB
+	useractivationCache *userActivationCache
 }
 
 func newStorage(db *sql.DB) *storage {
 	return &storage{
-		db: db,
+		db:                  db,
+		useractivationCache: newUserActivationCache(),
 	}
 }
 
