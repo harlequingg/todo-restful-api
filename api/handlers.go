@@ -97,7 +97,7 @@ func (app *application) createUserHandler(w http.ResponseWriter, r *http.Request
 		writeError(w, errors.New("internal server error"), http.StatusInternalServerError)
 		return
 	}
-	app.storage.useractivationCache.SetIfExpired(u, code, time.Minute)
+	app.storage.useractivationCache.Set(u, code, time.Minute)
 	writeJSON(w, map[string]any{"user": u, "message": fmt.Sprintf("we have sent an activation code to your email: %s", u.Email)}, http.StatusCreated)
 }
 
@@ -242,8 +242,7 @@ func (app *application) sendActivationCodeHandler(w http.ResponseWriter, r *http
 		return
 	}
 
-	_, expired := app.storage.useractivationCache.Get(u)
-	if expired {
+	if app.storage.useractivationCache.HasExpired(u) {
 		tmpl, err := template.ParseFS(templates, "templates/*.gotmpl")
 		if err != nil {
 			writeError(w, errors.New("internal server error"), http.StatusInternalServerError)
@@ -256,7 +255,7 @@ func (app *application) sendActivationCodeHandler(w http.ResponseWriter, r *http
 			writeError(w, errors.New("internal server error"), http.StatusInternalServerError)
 			return
 		}
-		app.storage.useractivationCache.SetIfExpired(u, code, time.Minute)
+		app.storage.useractivationCache.Set(u, code, time.Minute)
 	}
 	writeJSON(w, map[string]any{"message": fmt.Sprintf("we have sent an activation code to your email: %s", u.Email)}, http.StatusOK)
 }
