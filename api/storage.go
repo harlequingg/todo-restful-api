@@ -83,13 +83,13 @@ func (c *userActivationCache) Get(u *user) (int, bool) {
 	return int(e.code), time.Now().After(e.expiresAt)
 }
 
-func (c *userActivationCache) SetIfExpired(u *user, d time.Duration) {
+func (c *userActivationCache) SetIfExpired(u *user, code uint16, d time.Duration) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	e, ok := c.entries[u.ID]
 	if !ok || time.Now().After(e.expiresAt) {
 		c.entries[u.ID] = userActivationCacheEntry{
-			code:      uint16(rand.Uint32()),
+			code:      code,
 			expiresAt: time.Now().Add(d),
 		}
 	}

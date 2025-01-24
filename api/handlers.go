@@ -1,16 +1,22 @@
 package main
 
 import (
+	"embed"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"html/template"
 	"log"
+	"math/rand/v2"
 	"net/http"
 	"strconv"
 	"time"
 
 	"golang.org/x/crypto/bcrypt"
 )
+
+//go:embed templates
+var templates embed.FS
 
 func (app *application) healthCheckHandler(w http.ResponseWriter, r *http.Request) {
 	heathCheck := struct {
@@ -78,8 +84,20 @@ func (app *application) createUserHandler(w http.ResponseWriter, r *http.Request
 		writeError(w, err, http.StatusInternalServerError)
 		return
 	}
-	app.storage.useractivationCache.Set(u, time.Minute)
-	writeJSON(w, u, http.StatusCreated)
+
+	tmpl, err := template.ParseFS(templates, "templates/*.gotmpl")
+	if err != nil {
+		writeError(w, errors.New("internal server error"), http.StatusInternalServerError)
+		return
+	}
+	code := uint16(rand.Uint())
+	err = app.mailer.send(u.Email, tmpl, map[string]any{"code": code})
+	if err != nil {
+		writeError(w, errors.New("internal server error"), http.StatusInternalServerError)
+		return
+	}
+	app.storage.useractivationCache.SetIfExpired(u, code, time.Minute)
+	writeJSON(w, map[string]any{"user": u, "message": fmt.Sprintf("we have sent an activation code to your email: %s", u.Email)}, http.StatusCreated)
 }
 
 func (app *application) getUserHandler(w http.ResponseWriter, r *http.Request) {
@@ -217,16 +235,29 @@ func (app *application) sendActivationCodeHandler(w http.ResponseWriter, r *http
 		writeError(w, errors.New("internal server error"), http.StatusInternalServerError)
 		return
 	}
+
 	if u.IsActivated {
 		writeJSON(w, map[string]any{"message": "user already activated"}, http.StatusConflict)
 		return
 	}
-	// TODO: send mail to user with the code
-	app.storage.useractivationCache.SetIfExpired(u, time.Minute)
 
-	// TODO: temprary until we send emails
-	code, _ := app.storage.useractivationCache.Get(u)
-	writeJSON(w, map[string]any{"code": code}, http.StatusOK)
+	_, expired := app.storage.useractivationCache.Get(u)
+	if expired {
+		tmpl, err := template.ParseFS(templates, "templates/*.gotmpl")
+		if err != nil {
+			writeError(w, errors.New("internal server error"), http.StatusInternalServerError)
+			return
+		}
+		code := uint16(rand.Uint())
+		err = app.mailer.send(u.Email, tmpl, map[string]any{"code": code})
+		if err != nil {
+			log.Println(err)
+			writeError(w, errors.New("internal server error"), http.StatusInternalServerError)
+			return
+		}
+		app.storage.useractivationCache.SetIfExpired(u, code, time.Minute)
+	}
+	writeJSON(w, map[string]any{"message": fmt.Sprintf("we have sent an activation code to your email: %s", u.Email)}, http.StatusOK)
 }
 
 func (app *application) activateUserHandler(w http.ResponseWriter, r *http.Request) {
@@ -236,16 +267,21 @@ func (app *application) activateUserHandler(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
-	if !r.URL.Query().Has("code") {
-		writeError(w, errors.New("route query paramter {code}: must to be provided"), http.StatusBadRequest)
+	var input struct {
+		Code *int `json:"code"`
+	}
+
+	err = json.NewDecoder(r.Body).Decode(&input)
+	if err != nil {
+		writeError(w, errors.New("internal server error"), http.StatusInternalServerError)
 		return
 	}
 
-	code, err := strconv.Atoi(r.URL.Query().Get("code"))
-	if err != nil {
-		writeError(w, errors.New("route query paramter {code}: must to be a positive integer"), http.StatusBadRequest)
+	if input.Code == nil {
+		writeError(w, errors.New("code must be provided in request body"), http.StatusBadRequest)
 		return
 	}
+
 	u, err := app.storage.getUserByID(id)
 	if err != nil {
 		writeError(w, errors.New("internal server error"), http.StatusInternalServerError)
@@ -260,7 +296,7 @@ func (app *application) activateUserHandler(w http.ResponseWriter, r *http.Reque
 		writeJSON(w, map[string]any{"message": "code has expired"}, http.StatusConflict)
 		return
 	}
-	if activationCode != code {
+	if activationCode != *input.Code {
 		writeJSON(w, map[string]any{"message": "invalid activation code"}, http.StatusConflict)
 		return
 	}

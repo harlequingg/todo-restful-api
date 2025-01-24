@@ -6,6 +6,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"strconv"
 	"time"
 )
 
@@ -20,11 +21,19 @@ type config struct {
 		maxIdelConnections int
 		maxIdelTime        time.Duration
 	}
+	smtp struct {
+		host     string
+		port     int
+		username string
+		password string
+		sender   string
+	}
 }
 
 type application struct {
 	config  config
 	storage *storage
+	mailer  *mailer
 }
 
 func main() {
@@ -39,6 +48,19 @@ func main() {
 	flag.IntVar(&cfg.db.maxIdelConnections, "db-max-idel-conns", 25, "PostgreSQL max idel connections")
 	var maxIdelTime string
 	flag.StringVar(&maxIdelTime, "db-max-idel-time", "15m", "PostgreSQL max connection idel time")
+
+	flag.StringVar(&cfg.smtp.host, "smtp-host", os.Getenv("SMTP_HOST"), "SMTP host")
+
+	smtpPort, err := strconv.Atoi(os.Getenv("SMTP_PORT"))
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	flag.IntVar(&cfg.smtp.port, "smtp-port", smtpPort, "SMTP port")
+	flag.StringVar(&cfg.smtp.username, "smtp-username", os.Getenv("SMTP_USERNAME"), "SMTP host")
+	flag.StringVar(&cfg.smtp.password, "smtp-password", os.Getenv("SMTP_PASSWORD"), "SMTP password")
+	flag.StringVar(&cfg.smtp.sender, "smtp-sender", os.Getenv("SMTP_SENDER"), "SMTP sender")
+
 	flag.Parse()
 
 	d, err := time.ParseDuration(maxIdelTime)
@@ -58,6 +80,7 @@ func main() {
 	app := &application{
 		config:  cfg,
 		storage: newStorage(db),
+		mailer:  newMailer(cfg.smtp.host, cfg.smtp.port, cfg.smtp.username, cfg.smtp.password, cfg.smtp.sender),
 	}
 
 	srv := &http.Server{
