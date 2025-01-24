@@ -1,6 +1,7 @@
 package main
 
 import (
+	"crypto/rand"
 	"flag"
 	"fmt"
 	"log"
@@ -28,6 +29,7 @@ type config struct {
 		password string
 		sender   string
 	}
+	jwtSecret string
 }
 
 type application struct {
@@ -61,6 +63,7 @@ func main() {
 	flag.StringVar(&cfg.smtp.password, "smtp-password", os.Getenv("SMTP_PASSWORD"), "SMTP password")
 	flag.StringVar(&cfg.smtp.sender, "smtp-sender", os.Getenv("SMTP_SENDER"), "SMTP sender")
 
+	flag.StringVar(&cfg.jwtSecret, "jwt-secret", os.Getenv("JWT_SECRET"), "JWT secret")
 	flag.Parse()
 
 	d, err := time.ParseDuration(maxIdelTime)
@@ -76,6 +79,15 @@ func main() {
 		log.Fatal(err)
 	}
 	log.Println("established a connection with database")
+
+	if cfg.jwtSecret == "" {
+		secret := make([]byte, 32)
+		_, err = rand.Read(secret[:])
+		if err != nil {
+			log.Fatal(err)
+		}
+		cfg.jwtSecret = string(secret)
+	}
 
 	app := &application{
 		config:  cfg,

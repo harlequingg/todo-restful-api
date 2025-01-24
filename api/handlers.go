@@ -12,6 +12,7 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/golang-jwt/jwt/v4"
 	"golang.org/x/crypto/bcrypt"
 )
 
@@ -308,6 +309,58 @@ func (app *application) activateUserHandler(w http.ResponseWriter, r *http.Reque
 		return
 	}
 	writeJSON(w, map[string]any{"user": u}, http.StatusOK)
+}
+
+func (app *application) authenticateUserHandler(w http.ResponseWriter, r *http.Request) {
+	var input struct {
+		Email    string `json:"email"`
+		Password string `json:"password"`
+	}
+	err := json.NewDecoder(r.Body).Decode(&input)
+	if err != nil {
+		writeError(w, errors.New("internal server error"), http.StatusInternalServerError)
+		return
+	}
+
+	v := newValidator()
+	v.checkEmail(input.Email)
+	v.checkPassword(input.Password)
+
+	if v.hasErrors() {
+		writeError(w, v.toError(), http.StatusBadRequest)
+		return
+	}
+
+	u, err := app.storage.getUserByEmail(input.Email)
+	if err != nil {
+		log.Println(err)
+		writeError(w, errors.New("internal server error"), http.StatusInternalServerError)
+		return
+	}
+
+	if u == nil {
+		writeError(w, errors.New("email or password are not correct"), http.StatusUnauthorized)
+		return
+	}
+
+	err = bcrypt.CompareHashAndPassword(u.PasswordHash, []byte(input.Password))
+	if err != nil {
+		writeError(w, errors.New("email or password are not correct"), http.StatusUnauthorized)
+		return
+	}
+
+	claims := jwt.MapClaims{
+		"user_id":    u.ID,
+		"expires_at": time.Now().Add(24 * time.Hour).Format(time.RFC822),
+	}
+	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
+	tokenStr, err := token.SignedString([]byte(app.config.jwtSecret))
+	if err != nil {
+		log.Println(err)
+		writeError(w, errors.New("internal server error"), http.StatusInternalServerError)
+		return
+	}
+	writeJSON(w, map[string]any{"token": tokenStr}, http.StatusCreated)
 }
 
 func composeJSONError(err error) string {
