@@ -4,6 +4,9 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"fmt"
+	"log"
+	"strings"
 	"sync"
 	"time"
 
@@ -215,31 +218,45 @@ func (s *storage) getTaskByID(id int) (*task, error) {
 	return t, err
 }
 
-func (s *storage) getTasksForUser(u *user) ([]task, error) {
-	query := `SELECT id, created_at, content, is_completed, version
+func (s *storage) getTasksForUser(u *user, sort string, page, pageSize int, content string) ([]task, int, error) {
+	order := "ASC"
+	if strings.HasPrefix(sort, "-") {
+		order = "DESC"
+		sort, _ = strings.CutPrefix(sort, "-")
+	}
+	sortStr := fmt.Sprintf("%s %s", sort, order)
+	if sort != "id" {
+		sortStr = fmt.Sprintf("%s %s, id ASC", sort, order)
+	}
+	limit := pageSize
+	offset := (page - 1) * pageSize
+	query := fmt.Sprintf(`SELECT count(*) OVER(), id, created_at, content, is_completed, version
 			  FROM tasks
-			  WHERE user_id = $1`
+			  WHERE user_id = $1 AND ($2 = '' OR to_tsvector('simple', content) @@ plainto_tsquery('simple', $2))
+			  ORDER BY %s
+			  LIMIT $3 OFFSET $4`, sortStr)
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	var tasks []task
-	rows, err := s.db.QueryContext(ctx, query, u.ID)
+
+	log.Println(sortStr)
+	tasks := make([]task, 0)
+	rows, err := s.db.QueryContext(ctx, query, u.ID, content, limit, offset)
 	if err != nil {
-		return nil, err
+		return nil, 0, err
 	}
+	defer rows.Close()
+	total := 0
 	for rows.Next() {
 		t := task{
 			UserID: u.ID,
 		}
-		err := rows.Scan(&t.ID, &t.CreatedAt, &t.Content, &t.IsCompleted, &t.Version)
-		if err != nil {
-			return nil, err
-		}
+		rows.Scan(&total, &t.ID, &t.CreatedAt, &t.Content, &t.IsCompleted, &t.Version)
 		tasks = append(tasks, t)
 	}
 	if err := rows.Err(); err != nil {
-		return nil, err
+		return nil, 0, err
 	}
-	return tasks, nil
+	return tasks, total, nil
 }
 
 func (s *storage) updateTask(t *task) error {
