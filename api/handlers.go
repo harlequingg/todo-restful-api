@@ -101,25 +101,6 @@ func (app *application) createUserHandler(w http.ResponseWriter, r *http.Request
 	writeJSON(w, map[string]any{"user": u, "message": fmt.Sprintf("we have sent an activation code to your email: %s", u.Email)}, http.StatusCreated)
 }
 
-func (app *application) getUserHandler(w http.ResponseWriter, r *http.Request) {
-	id, err := strconv.Atoi(r.PathValue("id"))
-	if err != nil || id < -1 {
-		writeError(w, errors.New("route paramter {id}: must to be a positive integer"), http.StatusBadRequest)
-		return
-	}
-
-	u, err := app.storage.getUserByID(id)
-	if err != nil {
-		writeError(w, errors.New("internal server error"), http.StatusInternalServerError)
-		return
-	}
-	if u == nil {
-		writeError(w, errors.New("user doesn't exist"), http.StatusNotFound)
-		return
-	}
-	writeJSON(w, map[string]any{"user": u}, http.StatusOK)
-}
-
 func (app *application) updateUserHandler(w http.ResponseWriter, r *http.Request) {
 	id, err := strconv.Atoi(r.PathValue("id"))
 	if err != nil || id < -1 {
@@ -197,6 +178,25 @@ func (app *application) updateUserHandler(w http.ResponseWriter, r *http.Request
 	writeJSON(w, map[string]any{"user": u}, http.StatusOK)
 }
 
+func (app *application) getUserHandler(w http.ResponseWriter, r *http.Request) {
+	id, err := strconv.Atoi(r.PathValue("id"))
+	if err != nil || id < -1 {
+		writeError(w, errors.New("route paramter {id}: must to be a positive integer"), http.StatusBadRequest)
+		return
+	}
+
+	u, err := app.storage.getUserByID(id)
+	if err != nil {
+		writeError(w, errors.New("internal server error"), http.StatusInternalServerError)
+		return
+	}
+	if u == nil {
+		writeError(w, errors.New("user doesn't exist"), http.StatusNotFound)
+		return
+	}
+	writeJSON(w, map[string]any{"user": u}, http.StatusOK)
+}
+
 func (app *application) deleteUserHandler(w http.ResponseWriter, r *http.Request) {
 	id, err := strconv.Atoi(r.PathValue("id"))
 	if err != nil || id < -1 {
@@ -222,6 +222,182 @@ func (app *application) deleteUserHandler(w http.ResponseWriter, r *http.Request
 		return
 	}
 	writeJSON(w, map[string]any{"message": "user successfully deleted"}, http.StatusOK)
+}
+
+func (app *application) createTaskHandler(w http.ResponseWriter, r *http.Request) {
+	var input struct {
+		Content *string `json:"content"`
+	}
+	err := json.NewDecoder(r.Body).Decode(&input)
+	if err != nil {
+		writeError(w, errors.New("internal server error"), http.StatusInternalServerError)
+		return
+	}
+	v := newValidator()
+	v.checkCond(input.Content != nil, "content", "must be provided")
+	v.checkCond(input.Content != nil && *input.Content != "", "content", "content must not be empty")
+	if v.hasErrors() {
+		writeError(w, v.toError(), http.StatusBadRequest)
+		return
+	}
+	user := getUserFromRequest(r)
+	if user == nil {
+		writeError(w, errors.New("internal server error"), http.StatusInternalServerError)
+		return
+	}
+	t := &task{
+		Content: *input.Content,
+		UserID:  user.ID,
+	}
+	err = app.storage.insertTask(user, t)
+	if err != nil {
+		writeError(w, errors.New("internal server error"), http.StatusInternalServerError)
+		return
+	}
+	writeJSON(w, map[string]any{"task": t}, http.StatusCreated)
+}
+
+func (app *application) updateTaskHandler(w http.ResponseWriter, r *http.Request) {
+	id, err := strconv.Atoi(r.PathValue("id"))
+	if err != nil || id < -1 {
+		writeError(w, errors.New("route paramter {id}: must to be a positive integer"), http.StatusBadRequest)
+		return
+	}
+
+	var input struct {
+		Content     *string `json:"content"`
+		IsCompleted *bool   `json:"is_completed"`
+	}
+
+	err = json.NewDecoder(r.Body).Decode(&input)
+	if err != nil {
+		writeError(w, errors.New("internal server error"), http.StatusInternalServerError)
+		return
+	}
+
+	v := newValidator()
+	if input.Content != nil {
+		v.checkCond(*input.Content != "", "content", "must not be empty")
+	}
+	v.checkCond(input.Content != nil || input.IsCompleted != nil, "content or is_completed", "must be provided")
+	if v.hasErrors() {
+		writeError(w, v.toError(), http.StatusBadRequest)
+		return
+	}
+
+	user := getUserFromRequest(r)
+	if user == nil {
+		writeError(w, errors.New("internal server error"), http.StatusInternalServerError)
+		return
+	}
+
+	t, err := app.storage.getTaskByID(id)
+	if err != nil {
+		writeError(w, errors.New("internal server error"), http.StatusInternalServerError)
+		return
+	}
+	if t == nil {
+		writeError(w, errors.New("resource doesn't exist"), http.StatusNotFound)
+		return
+	}
+	if t.UserID != user.ID {
+		writeError(w, errors.New("access denied"), http.StatusConflict)
+		return
+	}
+	if input.Content != nil {
+		t.Content = *input.Content
+	}
+	if input.IsCompleted != nil {
+		t.IsCompleted = *input.IsCompleted
+	}
+	err = app.storage.updateTask(t)
+	if err != nil {
+		writeError(w, errors.New("internal server error"), http.StatusInternalServerError)
+		return
+	}
+	writeJSON(w, map[string]any{"task": t}, http.StatusOK)
+}
+
+func (app *application) getTaskHandler(w http.ResponseWriter, r *http.Request) {
+	id, err := strconv.Atoi(r.PathValue("id"))
+	if err != nil || id < -1 {
+		writeError(w, errors.New("route paramter {id}: must to be a positive integer"), http.StatusBadRequest)
+		return
+	}
+
+	user := getUserFromRequest(r)
+	if user == nil {
+		writeError(w, errors.New("internal server error"), http.StatusInternalServerError)
+		return
+	}
+
+	t, err := app.storage.getTaskByID(id)
+	if err != nil {
+		writeError(w, errors.New("internal server error"), http.StatusInternalServerError)
+		return
+	}
+	if t == nil {
+		writeError(w, errors.New("resource doesn't exist"), http.StatusNotFound)
+		return
+	}
+	if t.UserID != user.ID {
+		writeError(w, errors.New("access denied"), http.StatusConflict)
+		return
+	}
+	writeJSON(w, map[string]any{"task": t}, http.StatusOK)
+}
+
+func (app *application) getTasksHandler(w http.ResponseWriter, r *http.Request) {
+	user := getUserFromRequest(r)
+	if user == nil {
+		writeError(w, errors.New("internal server error"), http.StatusInternalServerError)
+		return
+	}
+
+	tasks, err := app.storage.getTasksForUser(user)
+	if err != nil {
+		writeError(w, errors.New("internal server error"), http.StatusInternalServerError)
+		return
+	}
+	if tasks == nil {
+		writeError(w, errors.New("resource doesn't exist"), http.StatusNotFound)
+		return
+	}
+	writeJSON(w, map[string]any{"tasks": tasks}, http.StatusOK)
+}
+
+func (app *application) deleteTaskHandler(w http.ResponseWriter, r *http.Request) {
+	id, err := strconv.Atoi(r.PathValue("id"))
+	if err != nil || id < -1 {
+		writeError(w, errors.New("route paramter {id}: must to be a positive integer"), http.StatusBadRequest)
+		return
+	}
+
+	user := getUserFromRequest(r)
+	if user == nil {
+		writeError(w, errors.New("internal server error"), http.StatusInternalServerError)
+		return
+	}
+
+	t, err := app.storage.getTaskByID(id)
+	if err != nil {
+		writeError(w, errors.New("internal server error"), http.StatusInternalServerError)
+		return
+	}
+	if t == nil {
+		writeError(w, errors.New("resource doesn't exist"), http.StatusNotFound)
+		return
+	}
+	if t.UserID != user.ID {
+		writeError(w, errors.New("access denied"), http.StatusConflict)
+		return
+	}
+	err = app.storage.deleteTask(t)
+	if err != nil {
+		writeError(w, errors.New("internal server error"), http.StatusInternalServerError)
+		return
+	}
+	writeJSON(w, map[string]any{"message": "task deleted successfully"}, http.StatusOK)
 }
 
 func (app *application) sendActivationCodeHandler(w http.ResponseWriter, r *http.Request) {

@@ -45,7 +45,7 @@ func main() {
 	flag.IntVar(&cfg.port, "port", 3000, "Server Port")
 	flag.StringVar(&cfg.env, "evn", "development", "Environment [development|production]")
 
-	flag.StringVar(&cfg.db.dsn, "db-dsn", os.Getenv("TODO_DB_DSN"), "PostgreSQL DSN")
+	flag.StringVar(&cfg.db.dsn, "db-dsn", os.Getenv("DB_DSN"), "PostgreSQL DSN")
 	flag.IntVar(&cfg.db.maxOpenConnections, "db-max-open-conns", 25, "PostgreSQL max open connections")
 	flag.IntVar(&cfg.db.maxIdelConnections, "db-max-idel-conns", 25, "PostgreSQL max idel connections")
 	var maxIdelTime string

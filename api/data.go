@@ -18,5 +18,5 @@ type task struct {
 	UserID      int       `json:"user_id"`
 	Content     string    `json:"content"`
 	IsCompleted bool      `json:"is_completed"`
-	Version     int       `json:"version"`
+	Version     int       `json:"-"`
 }

@@ -205,7 +205,12 @@ func (s *storage) getTaskByID(id int) (*task, error) {
 	}
 	err := s.db.QueryRowContext(ctx, query, id).Scan(&t.CreatedAt, &t.UserID, &t.Content, &t.IsCompleted, &t.Version)
 	if err != nil {
-		return nil, err
+		switch {
+		case errors.Is(err, sql.ErrNoRows):
+			return nil, nil
+		default:
+			return nil, err
+		}
 	}
 	return t, err
 }
