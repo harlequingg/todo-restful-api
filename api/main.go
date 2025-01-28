@@ -29,6 +29,11 @@ type config struct {
 		password string
 		sender   string
 	}
+	limiter struct {
+		maxRequestPerSecond float64
+		burst               int
+		enabled             bool
+	}
 	jwtSecret string
 }
 
@@ -64,6 +69,10 @@ func main() {
 	flag.StringVar(&cfg.smtp.sender, "smtp-sender", os.Getenv("SMTP_SENDER"), "SMTP sender")
 
 	flag.StringVar(&cfg.jwtSecret, "jwt-secret", os.Getenv("JWT_SECRET"), "JWT secret")
+
+	flag.Float64Var(&cfg.limiter.maxRequestPerSecond, "limiter-max-rps", 2, "Rate Limiter max requests per second")
+	flag.IntVar(&cfg.limiter.burst, "limiter-burst", 4, "Rate Limiter max burst")
+	flag.BoolVar(&cfg.limiter.enabled, "limiter-enabled", true, "Enable rate limiter")
 	flag.Parse()
 
 	d, err := time.ParseDuration(maxIdelTime)

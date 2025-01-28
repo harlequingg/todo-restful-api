@@ -23,6 +23,8 @@ func composeRoutes(app *application) http.Handler {
 	mux.HandleFunc("POST /v1/users/{id}/activate", app.sendActivationCodeHandler)
 	mux.HandleFunc("PUT /v1/users/{id}/activate", app.activateUserHandler)
 	mux.HandleFunc("POST /v1/users/auth", app.authenticateUserHandler)
-
+	if app.config.limiter.enabled {
+		return app.rateLimit(mux)
+	}
 	return mux
 }

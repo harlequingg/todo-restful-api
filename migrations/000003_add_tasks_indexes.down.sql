@@ -1,0 +1,1 @@
+DROP INDEX IF EXISTS tasks_content_index;

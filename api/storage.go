@@ -5,7 +5,6 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
-	"log"
 	"strings"
 	"sync"
 	"time"
@@ -238,7 +237,6 @@ func (s *storage) getTasksForUser(u *user, sort string, page, pageSize int, cont
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	log.Println(sortStr)
 	tasks := make([]task, 0)
 	rows, err := s.db.QueryContext(ctx, query, u.ID, content, limit, offset)
 	if err != nil {
