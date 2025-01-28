@@ -248,7 +248,10 @@ func (s *storage) getTasksForUser(u *user, sort string, page, pageSize int, cont
 		t := task{
 			UserID: u.ID,
 		}
-		rows.Scan(&total, &t.ID, &t.CreatedAt, &t.Content, &t.IsCompleted, &t.Version)
+		err = rows.Scan(&total, &t.ID, &t.CreatedAt, &t.Content, &t.IsCompleted, &t.Version)
+		if err != nil {
+			return nil, 0, err
+		}
 		tasks = append(tasks, t)
 	}
 	if err := rows.Err(); err != nil {

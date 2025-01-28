@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"strconv"
+	"strings"
 	"time"
 )
 
@@ -29,12 +30,17 @@ type config struct {
 		password string
 		sender   string
 	}
+	jwt struct {
+		secret string
+	}
 	limiter struct {
 		maxRequestPerSecond float64
 		burst               int
 		enabled             bool
 	}
-	jwtSecret string
+	cors struct {
+		trustedOrigins []string
+	}
 }
 
 type application struct {
@@ -68,11 +74,14 @@ func main() {
 	flag.StringVar(&cfg.smtp.password, "smtp-password", os.Getenv("SMTP_PASSWORD"), "SMTP password")
 	flag.StringVar(&cfg.smtp.sender, "smtp-sender", os.Getenv("SMTP_SENDER"), "SMTP sender")
 
-	flag.StringVar(&cfg.jwtSecret, "jwt-secret", os.Getenv("JWT_SECRET"), "JWT secret")
+	flag.StringVar(&cfg.jwt.secret, "jwt-secret", os.Getenv("JWT_SECRET"), "JWT secret")
 
 	flag.Float64Var(&cfg.limiter.maxRequestPerSecond, "limiter-max-rps", 2, "Rate Limiter max requests per second")
 	flag.IntVar(&cfg.limiter.burst, "limiter-burst", 4, "Rate Limiter max burst")
 	flag.BoolVar(&cfg.limiter.enabled, "limiter-enabled", true, "Enable rate limiter")
+
+	var trustedOrigins string
+	flag.StringVar(&trustedOrigins, "cors-trusted-origins", "*", "Trusted CORS origins saperated by space")
 	flag.Parse()
 
 	d, err := time.ParseDuration(maxIdelTime)
@@ -83,19 +92,21 @@ func main() {
 		cfg.db.maxIdelTime = d
 	}
 
+	cfg.cors.trustedOrigins = strings.Fields(trustedOrigins)
+
 	db, err := openDB(cfg)
 	if err != nil {
 		log.Fatal(err)
 	}
 	log.Println("established a connection with database")
 
-	if cfg.jwtSecret == "" {
+	if cfg.jwt.secret == "" {
 		secret := make([]byte, 32)
 		_, err = rand.Read(secret[:])
 		if err != nil {
 			log.Fatal(err)
 		}
-		cfg.jwtSecret = string(secret)
+		cfg.jwt.secret = string(secret)
 	}
 
 	app := &application{

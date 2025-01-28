@@ -15,7 +15,7 @@ import (
 	"golang.org/x/time/rate"
 )
 
-func (app *application) requireAuth(next http.HandlerFunc) http.HandlerFunc {
+func (app *application) requireAuthenticatedUser(next http.HandlerFunc) http.HandlerFunc {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Add("Vary", "Authorization")
 		authHeader := r.Header.Get("Authorization")
@@ -33,7 +33,7 @@ func (app *application) requireAuth(next http.HandlerFunc) http.HandlerFunc {
 			if _, ok := t.Method.(*jwt.SigningMethodHMAC); !ok {
 				return nil, fmt.Errorf("unexpected signing method: %v", t.Header["alg"])
 			}
-			return []byte(app.config.jwtSecret), nil
+			return []byte(app.config.jwt.secret), nil
 		})
 		if err != nil {
 			log.Println(err)
@@ -65,12 +65,16 @@ func (app *application) requireAuth(next http.HandlerFunc) http.HandlerFunc {
 			writeError(w, errors.New("internal server error"), http.StatusInternalServerError)
 			return
 		}
+		if u == nil {
+			writeError(w, errors.New("user no longer exists"), http.StatusUnauthorized)
+			return
+		}
 		ctx := context.WithValue(r.Context(), userContextKey, u)
 		next.ServeHTTP(w, r.WithContext(ctx))
 	})
 }
 
-func requireUserActivation(next http.HandlerFunc) http.HandlerFunc {
+func requireActivatedUser(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		user := getUserFromRequest(r)
 		if !user.IsActivated {
@@ -126,6 +130,31 @@ func (app *application) rateLimit(next http.Handler) http.HandlerFunc {
 			return
 		}
 		mu.Unlock()
+		next.ServeHTTP(w, r)
+	}
+}
+
+func (app *application) enableCORS(next http.Handler) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Add("Vary", "Origin")
+		w.Header().Add("Vary", "Access-Control-Request-Method")
+
+		origin := w.Header().Get("Origin")
+		if origin != "" {
+			for _, o := range app.config.cors.trustedOrigins {
+				if origin == o || o == "*" {
+					w.Header().Set("Access-Control-Allow-Origin", origin)
+					// preflight request
+					if r.Method == http.MethodOptions && r.Header.Get("Access-Control-Request-Method") != "" {
+						w.Header().Set("Access-Control-Allow-Methods", "OPTIONS, PUT, PATCH, DELETE")
+						w.Header().Set("Access-Control-Allow-Headers", "Authorization, Content-Type")
+						w.WriteHeader(http.StatusOK)
+						return
+					}
+					break
+				}
+			}
+		}
 		next.ServeHTTP(w, r)
 	}
 }

@@ -58,8 +58,7 @@ func (app *application) createUserHandler(w http.ResponseWriter, r *http.Request
 
 	u, err := app.storage.getUserByEmail(input.Email)
 	if err != nil {
-		log.Println(err)
-		writeError(w, errors.New("internal server errors"), http.StatusInternalServerError)
+		writeError(w, errors.New("internal server error"), http.StatusInternalServerError)
 		return
 	}
 
@@ -103,31 +102,15 @@ func (app *application) createUserHandler(w http.ResponseWriter, r *http.Request
 }
 
 func (app *application) updateUserHandler(w http.ResponseWriter, r *http.Request) {
-	id, err := strconv.Atoi(r.PathValue("id"))
-	if err != nil || id < -1 {
-		writeError(w, errors.New("route paramter {id}: must to be a positive integer"), http.StatusBadRequest)
-		return
-	}
-
 	var input struct {
 		Name     string `json:"name"`
 		Email    string `json:"email"`
 		Password string `json:"password"`
 	}
 
-	err = json.NewDecoder(r.Body).Decode(&input)
+	err := json.NewDecoder(r.Body).Decode(&input)
 	if err != nil {
 		writeError(w, err, http.StatusBadRequest)
-		return
-	}
-
-	u, err := app.storage.getUserByID(id)
-	if err != nil {
-		writeError(w, errors.New("internal server error"), http.StatusInternalServerError)
-		return
-	}
-	if u == nil {
-		writeError(w, errors.New("user doesn't exist with the provided id"), http.StatusNotFound)
 		return
 	}
 
@@ -146,19 +129,38 @@ func (app *application) updateUserHandler(w http.ResponseWriter, r *http.Request
 		v.checkPassword(input.Password)
 	}
 
-	v.checkCond(input.Name != "" || input.Email != "" || input.Password != "", "name or email or password", "must be provided")
+	v.checkCond(input.Name != "" || input.Email != "" || input.Password != "", "name or email or password", "atleast one must be provided")
 
 	if v.hasErrors() {
 		writeError(w, v.toError(), http.StatusBadRequest)
 		return
 	}
 
+	user := getUserFromRequest(r)
+	if user == nil {
+		writeError(w, errors.New("internal server error"), http.StatusInternalServerError)
+		return
+	}
+
+	u, err := app.storage.getUserByEmail(input.Email)
+	if err != nil {
+		writeError(w, errors.New("internal server error"), http.StatusInternalServerError)
+		return
+	}
+
+	if u != nil {
+		writeError(w, errors.New("email is already in use"), http.StatusConflict)
+		return
+	}
+
 	if input.Name != "" {
-		u.Name = input.Name
+		user.Name = input.Name
 	}
+
 	if input.Email != "" {
-		u.Email = input.Email
+		user.Email = input.Email
 	}
+
 	if input.Password != "" {
 		passwordHash, err := bcrypt.GenerateFromPassword([]byte(input.Password), 13)
 		if err != nil {
@@ -166,57 +168,35 @@ func (app *application) updateUserHandler(w http.ResponseWriter, r *http.Request
 			writeError(w, errors.New("internal server error"), http.StatusInternalServerError)
 			return
 		}
-		u.PasswordHash = passwordHash
+		user.PasswordHash = passwordHash
 	}
 
-	err = app.storage.updateUser(u)
+	err = app.storage.updateUser(user)
 	if err != nil {
 		log.Println(err)
 		writeError(w, errors.New("internal server error"), http.StatusInternalServerError)
 		return
 	}
-
-	writeJSON(w, map[string]any{"user": u}, http.StatusOK)
+	writeJSON(w, map[string]any{"user": user}, http.StatusOK)
 }
 
 func (app *application) getUserHandler(w http.ResponseWriter, r *http.Request) {
-	id, err := strconv.Atoi(r.PathValue("id"))
-	if err != nil || id < -1 {
-		writeError(w, errors.New("route paramter {id}: must to be a positive integer"), http.StatusBadRequest)
-		return
-	}
-
-	u, err := app.storage.getUserByID(id)
-	if err != nil {
+	user := getUserFromRequest(r)
+	if user == nil {
 		writeError(w, errors.New("internal server error"), http.StatusInternalServerError)
 		return
 	}
-	if u == nil {
-		writeError(w, errors.New("user doesn't exist"), http.StatusNotFound)
-		return
-	}
-	writeJSON(w, map[string]any{"user": u}, http.StatusOK)
+	writeJSON(w, map[string]any{"user": user}, http.StatusOK)
 }
 
 func (app *application) deleteUserHandler(w http.ResponseWriter, r *http.Request) {
-	id, err := strconv.Atoi(r.PathValue("id"))
-	if err != nil || id < -1 {
-		writeError(w, errors.New("route paramter {id}: must to be a positive integer"), http.StatusBadRequest)
-		return
-	}
-
-	u, err := app.storage.getUserByID(id)
-	if err != nil {
-		writeError(w, errors.New("internal server error"), http.StatusInternalServerError)
-		return
-	}
-
-	if u == nil {
+	user := getUserFromRequest(r)
+	if user == nil {
 		writeError(w, errors.New("user doesn't exist"), http.StatusNotFound)
 		return
 	}
 
-	err = app.storage.deleteUser(u)
+	err := app.storage.deleteUser(user)
 	if err != nil {
 		log.Println(err)
 		writeError(w, err, http.StatusInternalServerError)
@@ -566,7 +546,7 @@ func (app *application) authenticateUserHandler(w http.ResponseWriter, r *http.R
 		"expires_at": time.Now().Add(24 * time.Hour).Format(time.RFC822),
 	}
 	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
-	tokenStr, err := token.SignedString([]byte(app.config.jwtSecret))
+	tokenStr, err := token.SignedString([]byte(app.config.jwt.secret))
 	if err != nil {
 		log.Println(err)
 		writeError(w, errors.New("internal server error"), http.StatusInternalServerError)
